@@ -6,7 +6,6 @@ import android.os.Bundle;
 import android.widget.Button;
 import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -21,10 +20,11 @@ import com.google.firebase.database.FirebaseDatabase;
 import com.upt.cti.smartwallet.model.Payment;
 import com.upt.cti.smartwallet.ui.PaymentAdapter;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-public class NewActivity extends AppCompatActivity {
+public class Payments extends AppCompatActivity implements Serializable {
     private TextView tStatus;
     private Button bPrevious, bNext;
     private DatabaseReference databaseReference;
@@ -34,6 +34,7 @@ public class NewActivity extends AppCompatActivity {
     private List<Payment> payments = new ArrayList<>();
     private PaymentAdapter adapter;
     SharedPreferences prefs;
+
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -52,33 +53,63 @@ public class NewActivity extends AppCompatActivity {
         fabAdd.setOnClickListener(v -> onFab());
         prefs = getSharedPreferences("lastMonth", MODE_PRIVATE);
         currentMonth = prefs.getInt("month", -1);
-        if (currentMonth == -1)
+        final FirebaseDatabase database = FirebaseDatabase.getInstance();
+        if (currentMonth == -1) {
+            database.setPersistenceEnabled(true);
             currentMonth = Month.monthFromTimestamp(AppState.getCurrentTimeDate());
+        }
+        databaseReference = database.getReference();
+        AppState.get().setDatabaseReference(databaseReference);
 
-        // setup firebase
-        addPayments(p -> {
-            adapter = new PaymentAdapter(this, R.layout.item_payment, p);
-            listPayments.setAdapter(adapter);
-            if(p.size() == 0){
-                tStatus.setText("Found 0 payments for " + Month.intToMonthName(currentMonth));
+        if (!AppState.isNetworkAvailable(this)) {
+            if (AppState.get().hasLocalStorage(this)) {
+                try {
+                    payments = AppState.get().loadFromLocalBackup(this, currentMonth);
+                    tStatus.setText("Found " + payments.size() + " payments for " + Month.intToMonthName(currentMonth) + ".");
+                    adapter = new PaymentAdapter(this, R.layout.item_payment, payments);
+                    listPayments.setAdapter(adapter);
+                    if (payments.size() == 0) {
+                        tStatus.setText("Found 0 payments for " + Month.intToMonthName(currentMonth));
+                    }
+
+                    listPayments.setOnItemClickListener((parent, view, position, id) -> {
+                        AppState.get().setCurrentPayment(payments.get(position));
+
+                        startActivity(new Intent(getApplicationContext(), AddPaymentActivity.class));
+                    });
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
-            listPayments.setOnItemClickListener((parent, view, position, id) -> {
-                AppState.get().setCurrentPayment(payments.get(position));
+        } else {
+            // setup firebase
+            addPayments(p -> {
+                adapter = new PaymentAdapter(this, R.layout.item_payment, p);
+                listPayments.setAdapter(adapter);
+                if (p.size() == 0) {
+                    tStatus.setText("Found 0 payments for " + Month.intToMonthName(currentMonth));
+                }
+                listPayments.setOnItemClickListener((parent, view, position, id) -> {
+                    AppState.get().setCurrentPayment(payments.get(position));
 
-                startActivity(new Intent(getApplicationContext(), AddPaymentActivity.class));
+                    startActivity(new Intent(getApplicationContext(), AddPaymentActivity.class));
+                });
             });
-        });
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        if (!AppState.isNetworkAvailable(this)) {
+            if (AppState.get().hasLocalStorage(this)) {
+                payments = AppState.get().loadFromLocalBackup(this, currentMonth);
+                adapter.change(payments);
+            }
+        }
     }
 
     private void addPayments(FirebaseCallback callback) {
-        final FirebaseDatabase database = FirebaseDatabase.getInstance();
-        databaseReference = database.getReference();
-        AppState.get().setDatabaseReference(databaseReference);
         databaseReference.child("wallet").addChildEventListener(new ChildEventListener() {
             @Override
             public void onChildAdded(@NonNull DataSnapshot snapshot, @Nullable String previousChildName) {
@@ -89,9 +120,10 @@ public class NewActivity extends AppCompatActivity {
 
                         payments.add(payment);
                         callback.onCallBack(payments);
+                        AppState.get().updateLocalBackup(getApplicationContext(), payment, true);
 
                         tStatus.setText("Found " + payments.size() + " payments for " + Month.intToMonthName(currentMonth) + ".");
-                    }else {
+                    } else {
                         callback.onCallBack(payments);
                     }
                 } catch (Exception e) {
@@ -108,6 +140,8 @@ public class NewActivity extends AppCompatActivity {
                             updatePayment.setTimestamp(snapshot.getKey());
 
                             payments.set(i, updatePayment);
+                            AppState.get().updateLocalBackup(getApplicationContext(), payments.get(i), true);
+                            adapter.notifyDataSetChanged();
                         } catch (Exception e) {
                             e.printStackTrace();
                         }
@@ -117,8 +151,10 @@ public class NewActivity extends AppCompatActivity {
             @Override
             public void onChildRemoved(@NonNull DataSnapshot snapshot) {
                 for (int i = 0; i < payments.size(); i++) {
-                    if (payments.get(i).timestamp.equals(snapshot.getValue(Payment.class).timestamp))
+                    if (payments.get(i).timestamp.equals(snapshot.getKey())) {
+                        AppState.get().updateLocalBackup(getApplicationContext(), payments.get(i), false);
                         payments.remove(i);
+                    }
                 }
                 adapter.notifyDataSetChanged();
             }

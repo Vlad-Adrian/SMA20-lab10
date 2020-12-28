@@ -70,21 +70,25 @@ public class AddPaymentActivity extends AppCompatActivity {
                 }
                 break;
             case R.id.deleteButton:
-                if(payment != null)
-                    delete(payment.timestamp);
+                if (payment != null)
+                    delete(payment.timestamp, payment);
                 else
                     Toast.makeText(this, "payment does not exist", Toast.LENGTH_SHORT).show();
                 break;
         }
     }
 
-    private void delete(String timestamp) {
+    private void delete(String timestamp, Payment payment) {
+
+        if (!AppState.isNetworkAvailable(this)) {
+            AppState.get().updateLocalBackup(this, payment, false);
+        }
         databaseReference = AppState.get().getDatabaseReference();
         databaseReference.child("wallet").child(timestamp).removeValue();
         this.finish();
     }
 
-    private void save(String timestamp ) {
+    private void save(String timestamp) {
         if (cost.getText().toString().isEmpty() || description.getText().toString().isEmpty()) {
             Toast.makeText(this, "Please complete all fields in order to update", Toast.LENGTH_SHORT);
         } else {
@@ -92,8 +96,12 @@ public class AddPaymentActivity extends AppCompatActivity {
             Double c = Double.parseDouble(cost.getText().toString());
             String n = description.getText().toString();
             String t = spinner.getSelectedItem().toString();
-            //databaseReference.child("wallet").child(time).setValue(new Payment(c, n, t));
-            //this.finish();
+
+            if (!AppState.isNetworkAvailable(this)) {
+                Payment p = new Payment(c, n, t);
+                p.setTimestamp(time);
+                AppState.get().updateLocalBackup(this, p, true);
+            }
             AppState.get().getDatabaseReference().child("wallet").child(time).setValue(new Payment(c, n, t));
             this.finish();
 

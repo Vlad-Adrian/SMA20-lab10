@@ -28,6 +28,12 @@ public class PaymentAdapter extends ArrayAdapter<Payment> {
         this.layoutResID = layoutResourceID;
     }
 
+    public void change(List<Payment> payments){
+        this.payments.clear();
+        this.payments.addAll(payments);
+        notifyDataSetChanged();
+    }
+
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
         ItemHolder itemHolder;
